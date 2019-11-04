@@ -1,0 +1,10 @@
+version: "3.7"
+
+services:
+  service-ok:
+    image: "tutum/hello-world"
+    deploy:
+      replicas: 2
+
+  service-failing:    
+    image: "non-existing-image"
