@@ -60,7 +60,13 @@ func gatherFunc() {
 				return
 			}
 			for _, task := range list {
-				taskStateMetric.WithLabelValues(task.Spec.Networks[0].Aliases[0], string(task.Status.State), string(task.DesiredState)).Set(1)
+				service_name := ""
+				if len(task.Spec.Networks) > 0 && len(task.Spec.Networks[0].Aliases) > 0 {
+					service_name = task.Spec.Networks[0].Aliases[0]
+				}
+				state_current := string(task.Status.State)
+				state_desired := string(task.DesiredState)
+				taskStateMetric.WithLabelValues(service_name, state_current, state_desired).Set(1)
 			}
 			time.Sleep(time.Duration(viper.GetInt(interval)) * time.Millisecond)
 		}
