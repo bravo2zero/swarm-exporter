@@ -8,3 +8,5 @@ services:
 
   service-failing:
     image: "non-existing-image"
+    deploy:
+      replicas: 2

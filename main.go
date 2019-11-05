@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -12,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/client"
 )
 
@@ -29,7 +31,7 @@ var (
 			Name: "swarm_task_state_details",
 			Help: "Shows state details for task instances running (per service configured)",
 		},
-		[]string{"service_name", "current_state", "desired_state"},
+		[]string{"service_name", "current_state", "desired_state", "error_details"},
 	)
 )
 
@@ -54,23 +56,42 @@ func gatherFunc() {
 	}
 	go func() {
 		for {
+			latestTasks := make(map[string]swarm.Task)
 			list, err := cli.TaskList(ctx, types.TaskListOptions{})
-			if err != nil {
-				logrus.WithFields(logrus.Fields{"error": err}).Error("Error fetching service list")
-				return
-			}
-			for _, task := range list {
-				service_name := ""
-				if len(task.Spec.Networks) > 0 && len(task.Spec.Networks[0].Aliases) > 0 {
-					service_name = task.Spec.Networks[0].Aliases[0]
+			if err == nil {
+				// iterate ofer task list, get latest task status
+				for _, task := range list {
+					taskKey := getTaskKey(task)
+					if latest, ok := latestTasks[taskKey]; ok {
+						if task.Status.Timestamp.After(latest.Status.Timestamp) {
+							latestTasks[taskKey] = task
+						}
+					} else {
+						latestTasks[taskKey] = task
+					}
 				}
-				state_current := string(task.Status.State)
-				state_desired := string(task.DesiredState)
-				taskStateMetric.WithLabelValues(service_name, state_current, state_desired).Set(1)
+
+				// iterate over latest tasks and gather metrics
+				for taskKey, task := range latestTasks {
+					state_current := string(task.Status.State)
+					state_desired := string(task.DesiredState)
+					error_details := task.Status.Err
+					taskStateMetric.WithLabelValues(taskKey, state_current, state_desired, error_details).Set(1)
+				}
+			} else {
+				logrus.WithFields(logrus.Fields{"error": err}).Error("Error fetching service list")
 			}
+
 			time.Sleep(time.Duration(viper.GetInt(interval)) * time.Millisecond)
 		}
 	}()
+}
+
+func getTaskKey(task swarm.Task) string {
+	if len(task.Spec.Networks) > 0 && len(task.Spec.Networks[0].Aliases) > 0 {
+		return task.Spec.Networks[0].Aliases[0] + "." + strconv.Itoa(task.Slot)
+	}
+	return ""
 }
 
 func defineParam(name, envName string, defaultValue interface{}) {
