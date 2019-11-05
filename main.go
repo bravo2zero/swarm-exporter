@@ -2,9 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"os"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -25,70 +24,47 @@ const (
 )
 
 var (
-	missingServiceMetric = prometheus.NewGaugeVec(
+	taskStateMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "swarm_service_replicas_missing",
-			Help: "Shows whether cluster contains any service configuration without corresponding replica instances",
+			Name: "swarm_task_state_details",
+			Help: "Shows state details for task instances running (per service configured)",
 		},
-		[]string{"service_name"},
+		[]string{"service_name", "current_state", "desired_state"},
 	)
 )
 
 func main() {
-	defineParam(port, "EXPORTER_PORT", portDefault)
-	defineParam(interval, "EXPORTER_INTERVAL", intervalDefault)
+	defineParam(port, "METRICS_PORT", portDefault)
+	defineParam(interval, "METRICS_INTERVAL", intervalDefault)
 	logrus.SetLevel(logrus.DebugLevel)
 
-	prometheus.MustRegister(missingServiceMetric)
+	prometheus.MustRegister(taskStateMetric)
 	gatherFunc()
 
 	http.Handle(metricsPath, promhttp.Handler())
-	//http.ListenAndServe(":"+viper.GetString(port), nil)
+	http.ListenAndServe(":"+viper.GetString(port), nil)
 }
 
 func gatherFunc() {
-
 	ctx := context.Background()
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		logrus.WithFields(logrus.Fields{"error": err}).Error("Error creating Docker client")
 		return
 	}
-
-	list, err := cli.TaskList(ctx, types.TaskListOptions{})
-	if err != nil {
-		logrus.WithFields(logrus.Fields{"error": err}).Error("Error fetching service list")
-		return
-	}
-	for _, task := range list {
-		obj, _ := json.MarshalIndent(task, "", "  ")
-		//logrus.Infof("service: %v ", string(obj))
-		os.Stdout.Write(obj)
-	}
-
-	/* go func() {
+	go func() {
 		for {
-			// refactor me
-			//ctx := context.Background()
-			cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-			if err != nil {
-				logrus.WithFields(logrus.Fields{"error": err}).Error("Error creating Docker client")
-				return
-			}
-			list, err := cli.ServiceList(context.Background(), types.ServiceListOptions{})
+			list, err := cli.TaskList(ctx, types.TaskListOptions{})
 			if err != nil {
 				logrus.WithFields(logrus.Fields{"error": err}).Error("Error fetching service list")
 				return
 			}
-			for _, srv := range list {
-				srv.
+			for _, task := range list {
+				taskStateMetric.WithLabelValues(task.Spec.Networks[0].Aliases[0], string(task.Status.State), string(task.DesiredState)).Set(1)
 			}
-
-			// stub
-			missingServiceMetric.WithLabelValues("some_service_name").Set(rand.Float64())
 			time.Sleep(time.Duration(viper.GetInt(interval)) * time.Millisecond)
 		}
-	}() */
+	}()
 }
 
 func defineParam(name, envName string, defaultValue interface{}) {

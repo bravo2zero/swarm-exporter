@@ -6,5 +6,5 @@ services:
     deploy:
       replicas: 2
 
-  service-failing:    
+  service-failing:
     image: "non-existing-image"
