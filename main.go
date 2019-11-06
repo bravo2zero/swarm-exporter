@@ -59,6 +59,8 @@ func gatherFunc() {
 			latestTasks := make(map[string]swarm.Task)
 			list, err := cli.TaskList(ctx, types.TaskListOptions{})
 			if err == nil {
+				// reset metrics to delete stale values
+				taskStateMetric.Reset()
 				// iterate ofer task list, get latest task status
 				for _, task := range list {
 					taskKey := getTaskKey(task)
